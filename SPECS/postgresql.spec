@@ -693,6 +693,7 @@ install -d $RPM_BUILD_ROOT%{_unitdir}
 install -m 644 %{SOURCE10} $RPM_BUILD_ROOT%{_unitdir}/postgresql.service
 # Fix some more documentation
 cp %{SOURCE8} README.rpm-dist
+install -d $RPM_BUILD_ROOT%{_bindir}
 install -m 755 postgresql-setup $RPM_BUILD_ROOT%{_bindir}/postgresql-setup
 install -m 755 postgresql-check-db-dir $RPM_BUILD_ROOT%{_bindir}/postgresql-check-db-dir
 %else
