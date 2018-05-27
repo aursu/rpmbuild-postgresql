@@ -31,26 +31,28 @@
 
 %{!?beta:%global beta 0}
 
-%{!?test:%global test 1}
-%{!?upgrade:%global upgrade 1}
-%{!?plpython:%global plpython 1}
+%{!?test:%global test 0}
+%{!?upgrade:%global upgrade 0}
+%{!?plpython:%global plpython 0}
 %if 0%{?fedora} > 12
-%{!?plpython3:%global plpython3 1}
+%{!?plpython3:%global plpython3 0}
 %else
 %{!?plpython3:%global plpython3 0}
 %endif
-%{!?pltcl:%global pltcl 1}
-%{!?plperl:%global plperl 1}
+%{!?pltcl:%global pltcl 0}
+%{!?plperl:%global plperl 0}
 %{!?ssl:%global ssl 1}
-%{!?kerberos:%global kerberos 1}
-%{!?ldap:%global ldap 1}
+%{!?kerberos:%global kerberos 0}
+%{!?ldap:%global ldap 0}
 %{!?nls:%global nls 1}
 %{!?uuid:%global uuid 1}
-%{!?xml:%global xml 1}
+%{!?xml:%global xml 0}
 %{!?pam:%global pam 1}
-%{!?sdt:%global sdt 1}
-%{!?selinux:%global selinux 1}
+%{!?sdt:%global sdt 0}
+%{!?selinux:%global selinux 0}
 %{!?runselftest:%global runselftest 1}
+# git: https://github.com/devexp-db/postgresql-setup
+%{!?psqlsetup:%global psqlsetup 0}
 
 # By default, patch(1) creates backup files when chunks apply with offsets.
 # Turn that off to ensure such files don't get included in RPMs.
@@ -75,8 +77,8 @@ Url: http://www.postgresql.org/
 # in-place upgrade of an old database.  In most cases it will not be critical
 # that this be kept up with the latest minor release of the previous series;
 # but update when bugs affecting pg_dump output are fixed.
-%global prevversion 9.5.13
-%global prevmajorversion 9.5
+%global prevversion 8.4.20
+%global prevmajorversion 8.4
 
 %global setup_version 6.0
 
@@ -86,21 +88,26 @@ Source0: https://ftp.postgresql.org/pub/source/v%{version}/postgresql-%{version}
 Source1: postgresql-%{version}-US.pdf
 # generate-pdf.sh is not used during RPM build, but include for documentation
 Source2: generate-pdf.sh
-Source3: https://ftp.postgresql.org/pub/source/v%{prevversion}/postgresql-%{prevversion}.tar.bz2
-Source4: Makefile.regress
-Source9: postgresql.tmpfiles.d
-Source10: postgresql.pam
+Source3: postgresql.init
+Source4: postgresql-check-db-dir
+Source5: Makefile.regress
+Source8: README.rpm-dist
+Source9: postgresql-setup
+Source10: postgresql.service
 Source11: postgresql-bashprofile
-
 
 # git: https://github.com/devexp-db/postgresql-setup
 Source12: https://github.com/devexp-db/postgresql-setup/releases/download/v%{setup_version}/postgresql-setup-%{setup_version}.tar.gz
+
+Source13: postgresql.tmpfiles.d
+Source14: postgresql.pam
 
 # Those here are just to enforce packagers check that the tarball was downloaded
 # correctly.  Also, this allows us check that packagers-only tarballs do not
 # differ with publicly released ones.
 Source16: https://ftp.postgresql.org/pub/source/v%{version}/postgresql-%{version}.tar.bz2.sha256
 Source17: https://ftp.postgresql.org/pub/source/v%{prevversion}/postgresql-%{prevversion}.tar.bz2.sha256
+Source18: https://ftp.postgresql.org/pub/source/v%{prevversion}/postgresql-%{prevversion}.tar.bz2
 
 # Comments for these patches are in the patch files.
 Patch1: rpm-pgsql.patch
@@ -108,17 +115,27 @@ Patch2: postgresql-logging.patch
 Patch5: postgresql-var-run-socket.patch
 Patch6: postgresql-man.patch
 
+# Add support for atomic operations TAS/S_UNLOCK in |aarch64.
+# ~> upstream (612ecf311b)
+# ~> #970661
+Patch11: postgresql-9.2.4-aarch64-atomic-upgrade.patch
+
+# Force older postgres to create socket file in /var/run/postgresql
+# ~> downstream
+Patch12: postgresql-9.2.4-upgrade-from-8.4.13.patch
+
 BuildRequires: perl(ExtUtils::MakeMaker) glibc-devel bison flex gawk
-BuildRequires: perl(ExtUtils::Embed), perl-devel
 %if 0%{?fedora} || 0%{?rhel} > 7
 BuildRequires: perl-generators
 %endif
 BuildRequires: readline-devel zlib-devel
-BuildRequires: systemd util-linux
+BuildRequires: util-linux
 BuildRequires: multilib-rpm-config
 
+%if %psqlsetup
 # postgresql-setup build requires
 BuildRequires: m4 elinks docbook-utils help2man
+%endif
 
 %if %plpython
 BuildRequires: python-devel
@@ -168,6 +185,10 @@ BuildRequires: systemtap-sdt-devel
 BuildRequires: libselinux-devel
 %endif
 
+%if 0%{?fedora} || 0%{?rhel} >= 7
+BuildRequires: systemd, systemd-devel
+%endif
+
 # main package requires -libs subpackage
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
 
@@ -176,7 +197,7 @@ Requires: %{name}-libs%{?_isa} = %{version}-%{release}
 
 %description
 PostgreSQL is an advanced Object-Relational database management system (DBMS).
-The base postgresql package contains the client programs that you'll need to
+The base postgresql package contains the client programs that you will need to
 access a PostgreSQL DBMS server, as well as HTML documentation for the whole
 system.  These client programs can be located on the same machine as the
 PostgreSQL server, or on a remote machine that accesses a PostgreSQL server
@@ -193,7 +214,7 @@ Requires(post): glibc
 Requires(postun): glibc
 
 %description libs
-The postgresql-libs package provides the essential shared libraries for any 
+The postgresql-libs package provides the essential shared libraries for any
 PostgreSQL client program or interface. You will need to install this package
 to use any other PostgreSQL package or any clients that need to connect to a
 PostgreSQL server.
@@ -206,9 +227,16 @@ Requires: %{name}%{?_isa} = %{version}-%{release}
 Requires: %{name}-libs%{?_isa} = %{version}-%{release}
 Requires(pre): /usr/sbin/useradd
 # We require this to be present for %%{_prefix}/lib/tmpfiles.d
+%if 0%{?fedora} || 0%{?rhel} >= 7
 Requires: systemd
 # Make sure it's there when scriptlets run, too
 %{?systemd_requires}
+%else
+Requires(post): chkconfig
+Requires(preun): chkconfig, initscripts
+# This is for /sbin/service
+Requires(postun): initscripts
+%endif
 # Packages which provide postgresql plugins should build-require
 # postgresql-devel and require
 # postgresql-server(:MODULE_COMPAT_%%{postgresql_major}).
@@ -292,6 +320,10 @@ Requires: perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
 %if %runselftest
 BuildRequires: perl(Data::Dumper)
 %endif
+%if 0%{?rhel} >= 7 || 0%{?fedora} >= 22
+BuildRequires: perl(ExtUtils::Embed)
+%endif
+BuildRequires: perl-devel
 
 %description plperl
 The postgresql-plperl package contains the PL/Perl procedural language,
@@ -351,7 +383,11 @@ benchmarks.
 
 %prep
 ( cd %_sourcedir; sha256sum -c %{SOURCE16}; sha256sum -c %{SOURCE17} )
+%if %psqlsetup
 %setup -q -a 12
+%else
+%setup -q
+%endif
 %patch1 -p1
 %patch2 -p1
 %patch5 -p1
@@ -363,13 +399,41 @@ benchmarks.
 cp -p %{SOURCE1} .
 
 %if %upgrade
-tar xfj %{SOURCE3}
+tar xfj %{SOURCE18}
+# make sure older version is up-to-date on config.guess/config.sub;
+# not always necessary, but PG 9.2 knows about aarch64 while 9.1 doesn't
+# (and also see the ppc64p7 hack above)
+cp -p config/config.guess postgresql-%{prevversion}/config/config.guess
+cp -p config/config.sub postgresql-%{prevversion}/config/config.sub
 
-# apply once SOURCE3 is extracted
+pushd postgresql-%{prevversion}
+%patch11 -p2
+%patch12 -p2
+popd
 %endif
 
 # remove .gitignore files to ensure none get into the RPMs (bug #642210)
 find . -type f -name .gitignore | xargs rm
+
+%if 0%{?fedora} || 0%{?rhel} >= 7
+# prep the setup script, including insertion of some values it needs
+sed -e 's|^PGVERSION=.*$|PGVERSION=%{version}|' \
+        -e 's|^PGMAJORVERSION=.*$|PGMAJORVERSION=%{majorversion}|' \
+        -e 's|^PGENGINE=.*$|PGENGINE=%{_bindir}|' \
+        -e 's|^PREVMAJORVERSION=.*$|PREVMAJORVERSION=%{prevmajorversion}|' \
+        -e 's|^PREVPGENGINE=.*$|PREVPGENGINE=%{_libdir}/pgsql/postgresql-%{prevmajorversion}/bin|' \
+        -e 's|^README_RPM_DIST=.*$|README_RPM_DIST=%{_pkgdocdir}/%(basename %{SOURCE8})|' \
+        <%{SOURCE9} >postgresql-setup
+touch -r %{SOURCE9} postgresql-setup
+chmod +x postgresql-setup
+
+# prep the startup check script, including insertion of some values it needs
+sed -e 's|^PGVERSION=.*$|PGVERSION=%{version}|' \
+        -e 's|^PREVMAJORVERSION=.*$|PREVMAJORVERSION=%{prevmajorversion}|' \
+        -e 's|^PGDOCDIR=.*$|PGDOCDIR=%{_pkgdocdir}|' \
+        <%{SOURCE4} >postgresql-check-db-dir
+touch -r %{SOURCE4} postgresql-check-db-dir
+%endif
 
 %build
 
@@ -383,8 +447,8 @@ find . -type f -name .gitignore | xargs rm
 	fi
 %endif
 
+%if %psqlsetup
 # Building postgresql-setup
-
 cd postgresql-setup-%{setup_version}
 
 %configure \
@@ -395,6 +459,7 @@ cd postgresql-setup-%{setup_version}
 
 make %{?_smp_mflags}
 cd ..
+%endif
 
 # Fiddling with CFLAGS.
 
@@ -461,6 +526,9 @@ export PYTHON=/usr/bin/python3
 %if %selinux
 	--with-selinux \
 %endif
+%if 0%{?fedora} || 0%{?rhel} >= 7
+	--with-systemd \
+%endif
 	--with-system-tzdata=%{_datadir}/zoneinfo \
 	--datadir=%{_datadir}/pgsql
 
@@ -523,6 +591,9 @@ unset PYTHON
 %endif
 %if %selinux
 	--with-selinux \
+%endif
+%if 0%{?fedora} || 0%{?rhel} >= 7
+	--with-systemd \
 %endif
 	--with-system-tzdata=%_datadir/zoneinfo \
 	--datadir=%_datadir/pgsql
@@ -617,7 +688,20 @@ test "$test_failure" -eq 0
 %endif
 
 %install
+%if 0%{?fedora} || 0%{?rhel} >= 7
+install -d $RPM_BUILD_ROOT%{_unitdir}
+install -m 644 %{SOURCE10} $RPM_BUILD_ROOT%{_unitdir}/postgresql.service
+# Fix some more documentation
+cp %{SOURCE8} README.rpm-dist
+install -m 755 postgresql-setup $RPM_BUILD_ROOT%{_bindir}/postgresql-setup
+install -m 755 postgresql-check-db-dir $RPM_BUILD_ROOT%{_bindir}/postgresql-check-db-dir
+%else
+install -d $RPM_BUILD_ROOT%{_initrddir}
+sed 's/^PGVERSION=.*$/PGVERSION=%{version}/' <%{SOURCE3} >postgresql.init
+install -m 755 postgresql.init $RPM_BUILD_ROOT%{_initrddir}/postgresql
+%endif
 
+%if %psqlsetup
 cd postgresql-setup-%{setup_version}
 make install DESTDIR=$RPM_BUILD_ROOT
 cd ..
@@ -635,7 +719,7 @@ engine          %{_libdir}/pgsql/postgresql-%{prevmajorversion}/bin
 description     "Upgrade data from system PostgreSQL version (PostgreSQL %{prevmajorversion})"
 redhat_sockets_hack no
 EOF
-
+%endif
 
 make DESTDIR=$RPM_BUILD_ROOT install-world
 
@@ -669,7 +753,7 @@ cp -p src/tutorial/* $RPM_BUILD_ROOT%{_libdir}/pgsql/tutorial
 
 %if %pam
 install -d $RPM_BUILD_ROOT/etc/pam.d
-install -m 644 %{SOURCE10} $RPM_BUILD_ROOT/etc/pam.d/postgresql
+install -m 644 %{SOURCE14} $RPM_BUILD_ROOT/etc/pam.d/postgresql
 %endif
 
 # Create the directory for sockets.
@@ -677,7 +761,7 @@ install -d -m 755 $RPM_BUILD_ROOT%{?_localstatedir}/run/postgresql
 
 # ... and make a tmpfiles script to recreate it at reboot.
 mkdir -p $RPM_BUILD_ROOT%{_tmpfilesdir}
-install -m 0644 %{SOURCE9} $RPM_BUILD_ROOT%{_tmpfilesdir}/postgresql.conf
+install -m 0644 %{SOURCE13} $RPM_BUILD_ROOT%{_tmpfilesdir}/postgresql.conf
 
 # PGDATA needs removal of group and world permissions due to pg_pwd hole.
 install -d -m 700 $RPM_BUILD_ROOT%{?_localstatedir}/lib/pgsql/data
@@ -704,7 +788,6 @@ install -m 644 %{SOURCE11} $RPM_BUILD_ROOT%{?_localstatedir}/lib/pgsql/.bash_pro
 	rm bin/dropuser
 	rm bin/ecpg
 	rm bin/initdb
-	rm bin/pg_basebackup
 	rm bin/pg_config
 	rm bin/pg_dump
 	rm bin/pg_dumpall
@@ -737,7 +820,7 @@ install -m 644 %{SOURCE11} $RPM_BUILD_ROOT%{?_localstatedir}/lib/pgsql/.bash_pro
 	# Makefiles, however.
 	mkdir -p $RPM_BUILD_ROOT%{_libdir}/pgsql/test
 	cp -a src/test/regress $RPM_BUILD_ROOT%{_libdir}/pgsql/test
-	# pg_regress binary should be only in one subpackage, 
+	# pg_regress binary should be only in one subpackage,
 	# there will be a symlink from -test to -devel
 	rm -f $RPM_BUILD_ROOT%{_libdir}/pgsql/test/regress/pg_regress
 	ln -sf ../../pgxs/src/test/regress/pg_regress $RPM_BUILD_ROOT%{_libdir}/pgsql/test/regress/pg_regress
@@ -746,7 +829,7 @@ install -m 644 %{SOURCE11} $RPM_BUILD_ROOT%{?_localstatedir}/lib/pgsql/.bash_pro
 	chmod 0755 pg_regress regress.so
 	popd
 	sed 's|@bindir@|%{_bindir}|g' \
-		< %{SOURCE4} \
+		< %{SOURCE5} \
 		> $RPM_BUILD_ROOT%{_libdir}/pgsql/test/regress/Makefile
 	chmod 0644 $RPM_BUILD_ROOT%{_libdir}/pgsql/test/regress/Makefile
 %endif
@@ -826,8 +909,8 @@ cat postgres-%{majorversion}.lang >>server.lst
 cat psql-%{majorversion}.lang >>main.lst
 %endif
 
-%post libs -p /sbin/ldconfig 
-%postun libs -p /sbin/ldconfig 
+%post libs -p /sbin/ldconfig
+%postun libs -p /sbin/ldconfig
 
 %pre server
 /usr/sbin/groupadd -g 26 -o -r postgres >/dev/null 2>&1 || :
@@ -835,22 +918,35 @@ cat psql-%{majorversion}.lang >>main.lst
 	-c "PostgreSQL Server" -u 26 postgres >/dev/null 2>&1 || :
 
 %post server
+%if 0%{?fedora} || 0%{?rhel} >= 7
 %systemd_post %service_name
-
-
-%preun server
-%systemd_preun %service_name
-
-
-%postun server
-%systemd_postun_with_restart %service_name
-
-
-%check
-%if %runselftest
-make -C postgresql-setup-%{setup_version} check
+%else
+/sbin/chkconfig --add postgresql
 %endif
 
+%preun server
+%if 0%{?fedora} || 0%{?rhel} >= 7
+%systemd_preun %service_name
+%else
+if [ $1 = 0 ] ; then
+	/sbin/service postgresql stop >/dev/null 2>&1
+	/sbin/chkconfig --del postgresql
+fi
+%endif
+
+%postun server
+%if 0%{?fedora} || 0%{?rhel} >= 7
+%systemd_postun_with_restart %service_name
+%else
+if [ $1 -ge 1 ] ; then
+	/sbin/service postgresql condrestart >/dev/null 2>&1 || :
+fi
+%endif
+
+%check
+%if %runselftest && %psqlsetup
+make -C postgresql-setup-%{setup_version} check
+%endif
 
 %clean
 
@@ -859,7 +955,9 @@ make -C postgresql-setup-%{setup_version} check
 %files -f main.lst
 %doc doc/KNOWN_BUGS doc/MISSING_FEATURES doc/TODO
 %doc COPYRIGHT README HISTORY doc/bug.template
+%if %psqlsetup || 0%{?fedora} || 0%{?rhel} >= 7
 %doc README.rpm-dist
+%endif
 %{_bindir}/clusterdb
 %{_bindir}/createdb
 %{_bindir}/createlang
@@ -1047,8 +1145,13 @@ make -C postgresql-setup-%{setup_version} check
 %{_bindir}/pg_resetxlog
 %{_bindir}/pg_rewind
 %{_bindir}/postgres
-%{_bindir}/postgresql-setup
 %{_bindir}/postmaster
+%if %psqlsetup || 0%{?fedora} || 0%{?rhel} >= 7
+%{_bindir}/postgresql-setup
+%endif
+%if 0%{?fedora} || 0%{?rhel} >= 7
+%{_bindir}/postgresql-check-db-dir
+%endif
 %dir %{_datadir}/pgsql
 %{_datadir}/pgsql/*.sample
 %dir %{_datadir}/pgsql/contrib
@@ -1064,22 +1167,12 @@ make -C postgresql-setup-%{setup_version} check
 %{_datadir}/pgsql/system_views.sql
 %{_datadir}/pgsql/timezonesets/
 %{_datadir}/pgsql/tsearch_data/
-%dir %{_datadir}/postgresql-setup
-%{_datadir}/postgresql-setup/library.sh
-%{_datadir}/postgresql-setup/postgresql_pkg_tests.sh
 %{_libdir}/pgsql/*_and_*.so
 %{_libdir}/pgsql/dict_snowball.so
 %{_libdir}/pgsql/euc2004_sjis2004.so
 %{_libdir}/pgsql/libpqwalreceiver.so
 %{_libdir}/pgsql/pg_prewarm.so
 %{_libdir}/pgsql/plpgsql.so
-%dir %{_libexecdir}/initscripts/legacy-actions/postgresql
-%{_libexecdir}/initscripts/legacy-actions/postgresql/*
-%{_libexecdir}/postgresql-check-db-dir
-%{_libexecdir}/postgresql-ctl
-%dir %{_sysconfdir}/postgresql-setup
-%dir %{_sysconfdir}/postgresql-setup/upgrade
-%config %{_sysconfdir}/postgresql-setup/upgrade/*.conf
 %{_mandir}/man1/initdb.*
 %{_mandir}/man1/pg_basebackup.*
 %{_mandir}/man1/pg_controldata.*
@@ -1088,12 +1181,13 @@ make -C postgresql-setup-%{setup_version} check
 %{_mandir}/man1/pg_resetxlog.*
 %{_mandir}/man1/pg_rewind.*
 %{_mandir}/man1/postgres.*
-%{_mandir}/man1/postgresql-new-systemd-unit.*
-%{_mandir}/man1/postgresql-setup.*
 %{_mandir}/man1/postmaster.*
-%{_sbindir}/postgresql-new-systemd-unit
+%if 0%{?fedora} || 0%{?rhel} >= 7
+%{_unitdir}/postgresql.service
 %{_tmpfilesdir}/postgresql.conf
-%{_unitdir}/*postgresql*.service
+%else
+%config(noreplace) %{_initrddir}/postgresql
+%endif
 %attr(700,postgres,postgres) %dir %{?_localstatedir}/lib/pgsql
 %attr(644,postgres,postgres) %config(noreplace) %{?_localstatedir}/lib/pgsql/.bash_profile
 %attr(700,postgres,postgres) %dir %{?_localstatedir}/lib/pgsql/backups
@@ -1102,7 +1196,24 @@ make -C postgresql-setup-%{setup_version} check
 %if %pam
 %config(noreplace) /etc/pam.d/postgresql
 %endif
-
+%if %psqlsetup
+%dir %{_libexecdir}/initscripts/legacy-actions/postgresql
+%{_libexecdir}/initscripts/legacy-actions/postgresql/*
+%{_libexecdir}/postgresql-check-db-dir
+%{_libexecdir}/postgresql-ctl
+%dir %{_datadir}/postgresql-setup
+%{_datadir}/postgresql-setup/library.sh
+%{_datadir}/postgresql-setup/postgresql_pkg_tests.sh
+%dir %{_sysconfdir}/postgresql-setup
+%dir %{_sysconfdir}/postgresql-setup/upgrade
+%config %{_sysconfdir}/postgresql-setup/upgrade/*.conf
+%{_mandir}/man1/postgresql-setup.*
+%if 0%{?fedora} || 0%{?rhel} >= 7
+%{_mandir}/man1/postgresql-new-systemd-unit.*
+%{_sbindir}/postgresql-new-systemd-unit
+%{_unitdir}/*postgresql*.service
+%endif
+%endif
 
 %files devel -f devel.lst
 %{_bindir}/ecpg
@@ -1117,7 +1228,9 @@ make -C postgresql-setup-%{setup_version} check
 %{_mandir}/man1/ecpg.*
 %{_mandir}/man1/pg_config.*
 %{_mandir}/man3/SPI_*
+%if %psqlsetup
 %{macrosdir}/*
+%endif
 
 %files static
 %{_libdir}/libpgcommon.a
@@ -1416,8 +1529,8 @@ make -C postgresql-setup-%{setup_version} check
   http://www.postgresql.org/docs/9.3/static/release-9-3-4.html
 
 * Thu Mar 13 2014 Jozef Mlich <jmlich@redhat.com> - 9.3.3-2
-- Fix WAL replay of locking an updated tuple 
-  kudos to Alvaro Herrera 
+- Fix WAL replay of locking an updated tuple
+  kudos to Alvaro Herrera
 
 * Thu Feb 20 2014 Jozef Mlich <jmlich@redhat.com> - 9.3.3-1
 - update to 9.3.3 minor version per release notes:
@@ -2207,5 +2320,5 @@ Resolves: #161470
 - Default to compiling libpq and ECPG as fully thread-safe
 
 - 7.4 Origin.  See previous spec files for previous history. Adapted
-- from Red Hat and PGDG's 7.3.4 RPM, directly descended from 
+- from Red Hat and PGDG's 7.3.4 RPM, directly descended from
 - postgresql-7.3.4-2 as shipped in Fedora Core 1.
