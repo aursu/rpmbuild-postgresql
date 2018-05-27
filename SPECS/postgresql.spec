@@ -65,7 +65,7 @@ Summary: PostgreSQL client programs
 Name: postgresql
 %global majorversion 9.6
 Version: 9.6.9
-Release: 1%{?dist}
+Release: 2%{?dist}
 
 # The PostgreSQL license is very similar to other MIT licenses, but the OSI
 # recognizes it as an independent license, so we do as well.
@@ -1277,6 +1277,14 @@ make -C postgresql-setup-%{setup_version} check
 %endif
 
 %changelog
+* Sun May 27 2018 Alexander Ursu <alexander.ursu@gmail.com> - 9.6.9-2
+- disable unnecessary features (XML, LDAP, GSSAPI, PL/Python, PL/Tcl,
+  PL/Perl, upgrade)
+- replaced postgresql-setup from project
+  https://github.com/devexp-db/postgresql-setup with once from
+  CentOS 7 build
+- added SysV init scrypt and Systemd unit with helpers
+
 * Thu May 10 2018 Pavel Raiskup <praiskup@redhat.com> - 9.6.9-1
 - update to 9.6.9 per release notes:
   https://www.postgresql.org/docs/9.6/static/release-9-6-9.html
