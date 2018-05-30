@@ -93,9 +93,9 @@ https://github.com/aursu/docker-rpmbuild/blob/master/README for details)
 
 1. Build images
 
-```
-docker-compose build
-```
+    ```
+    docker-compose build
+    ```
 
 2. Build packages
 
