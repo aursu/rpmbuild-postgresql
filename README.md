@@ -57,24 +57,24 @@ any build repo):
 
     2.1. pull official CentOS images
 
-        ```
-        docker pull centos:6
-        docker pull centos:7
-        ```
+         ```
+         docker pull centos:6
+         docker pull centos:7
+         ```
 
-    2.2 setup base images
+    2.2. setup base images
 
         ```
         docker-compose -f centos/docker-compose.yml build
         ```
 
-    2.3 setup rpmbuild base images
+    2.3. setup rpmbuild base images
 
         ```
         docker-compose -f rpmbuild/docker-compose.yml build
         ```
 
-    2.4 run webrepo service and createrepo service (see
+    2.4. run webrepo service and createrepo service (see
 https://github.com/aursu/docker-rpmbuild/blob/master/README for details)
 
         ```
@@ -86,7 +86,7 @@ https://github.com/aursu/docker-rpmbuild/blob/master/README for details)
         90705414e549        rpmbuild:createrepo   "/bin/sh -c /usr/loc…"   About a minute ago   Up 42 seconds                            rpmbuild_centos6repo_1
         ```
 
-    2.5 wait about 1 minute before any other build operation
+    2.5. wait about 1 minute before any other build operation
 
 ### Build process
 
