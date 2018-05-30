@@ -45,7 +45,7 @@ port)
 
 ### Setup
 
-1. clone build repo with submodules (postgresql is just an example - it could be
+1. Clone build repo with submodules (postgresql is just an example - it could be
 any build repo):
 
     ```
@@ -53,28 +53,28 @@ any build repo):
     cd rpmbuild-postgresql
     ```
 
-2. setup build environment:
+2. Setup build environment:
 
-    2.1. pull official CentOS images
+    2.1. Pull official CentOS images
 
     ```
     docker pull centos:6
     docker pull centos:7
     ```
 
-    2.2. setup base images
+    2.2. Setup base images
 
     ```
     docker-compose -f centos/docker-compose.yml build
     ```
 
-    2.3. setup rpmbuild base images
+    2.3. Setup rpmbuild base images
 
     ```
     docker-compose -f rpmbuild/docker-compose.yml build
     ```
 
-    2.4. run webrepo service and createrepo service (see
+    2.4. Run webrepo service and createrepo service (see
 https://github.com/aursu/docker-rpmbuild/blob/master/README for details)
 
     ```
@@ -99,11 +99,11 @@ docker-compose build
 
 2. Build packages
 
-```
-docker-compose up -d
-```
+    ```
+    docker-compose up -d
+    ```
 
-command above will start all build serrvices in background. But it is possible
+    command above will start all build serrvices in background. But it is possible
 to run any of them or run in foreground etc
 
 3. Wait until command `docker-compose ps` returns all services in state 'Exit 0'
@@ -122,5 +122,6 @@ To complete all build processes run commands:
 docker-compose down
 docker-compose -f rpmbuild/docker-compose.yml down
 ```
+
 These commands will stop and remove all containers but not build images (see
 `docker images` and `docker rmi` commands manuals)
