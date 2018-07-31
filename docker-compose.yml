@@ -1,11 +1,22 @@
 version: "3.4"
 services:
+  centos7postgresbase:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    image: aursu/pgbuild:7-base
+  centos6postgresbase:
+    build:
+      context: .
+      dockerfile: Dockerfile.6-base
+    image: aursu/pgbuild:6-base
   postgresql6build:
     volumes:
       - rpms:/home/centos/rpmbuild/SRPMS
       - rpm6:/home/centos/rpmbuild/RPMS
     build:
       context: .
+      dockerfile: Dockerfile.el6
     image: aursu/pgbuild:el6
   postgresql7build:
     volumes:
@@ -13,7 +24,6 @@ services:
       - rpm7:/home/centos/rpmbuild/RPMS
     build:
       context: .
-      dockerfile: Dockerfile.el7
     image: aursu/pgbuild:el7
 
 volumes:
