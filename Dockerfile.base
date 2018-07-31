@@ -1,0 +1,14 @@
+FROM aursu/rpmbuild:7-build
+
+USER root
+RUN yum -y install \
+        gettext \
+        multilib-rpm-config \
+        openssl-devel \
+        pam-devel \
+        perl-ExtUtils-MakeMaker \
+        readline-devel \
+        systemd-devel \
+        uuid-devel \
+        zlib-devel \
+    && yum clean all && rm -rf /var/cache/yum
