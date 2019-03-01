@@ -1,0 +1,12 @@
+version: "3.4"
+services:
+  centos7postgresbase:
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    image: aursu/pgbuild:7-base
+  centos6postgresbase:
+    build:
+      context: .
+      dockerfile: Dockerfile.6-base
+    image: aursu/pgbuild:6-base
