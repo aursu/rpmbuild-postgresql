@@ -47,7 +47,9 @@ installcheck-parallel: cleandirs
 cleandirs:
 	-rm -rf testtablespace results
 	mkdir testtablespace results
-	[ -x /usr/bin/chcon ] && /usr/bin/chcon -u system_u -r object_r -t postgresql_db_t testtablespace results
+	if test -x /usr/bin/chcon && ! test -f /.dockerenv; then \
+	    /usr/bin/chcon -u system_u -r object_r -t postgresql_db_t testtablespace results ; \
+	fi
 
 # old interfaces follow...
 

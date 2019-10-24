@@ -51,8 +51,6 @@
 %{!?sdt:%global sdt 0}
 %{!?selinux:%global selinux 0}
 %{!?runselftest:%global runselftest 1}
-# git: https://github.com/devexp-db/postgresql-setup
-%{!?psqlsetup:%global psqlsetup 0}
 
 # By default, patch(1) creates backup files when chunks apply with offsets.
 # Turn that off to ensure such files don't get included in RPMs.
@@ -64,7 +62,8 @@
 Summary: PostgreSQL client programs
 Name: postgresql
 %global majorversion 9.6
-Version: 9.6.11
+Version: 9.6.15
+%{?dirty_hack_epoch}
 Release: 1%{?dist}
 
 # The PostgreSQL license is very similar to other MIT licenses, but the OSI
@@ -77,10 +76,12 @@ Url: http://www.postgresql.org/
 # in-place upgrade of an old database.  In most cases it will not be critical
 # that this be kept up with the latest minor release of the previous series;
 # but update when bugs affecting pg_dump output are fixed.
-%global prevversion 8.4.20
-%global prevmajorversion 8.4
+%global prevversion 9.5.19
+%global prevmajorversion 9.5
+%global prev_prefix %{_libdir}/pgsql/postgresql-%{prevmajorversion}
+%global precise_version %{?epoch:%epoch:}%version-%release
 
-%global setup_version 6.0
+%global setup_version 8.4
 
 %global service_name postgresql.service
 Source0: https://ftp.postgresql.org/pub/source/v%{version}/postgresql-%{version}.tar.bz2
@@ -114,6 +115,8 @@ Patch1: rpm-pgsql.patch
 Patch2: postgresql-logging.patch
 Patch5: postgresql-var-run-socket.patch
 Patch6: postgresql-man.patch
+Patch8: postgresql-external-libpq.patch
+Patch9: postgresql-server-pg_config.patch
 
 # Add support for atomic operations TAS/S_UNLOCK in |aarch64.
 # ~> upstream (612ecf311b)
@@ -124,18 +127,18 @@ Patch11: postgresql-9.2.4-aarch64-atomic-upgrade.patch
 # ~> downstream
 Patch12: postgresql-9.2.4-upgrade-from-8.4.13.patch
 
+BuildRequires: gcc
 BuildRequires: perl(ExtUtils::MakeMaker) glibc-devel bison flex gawk
 %if 0%{?fedora} || 0%{?rhel} > 7
 BuildRequires: perl-generators
+BuildRequires: systemd systemd-devel
 %endif
 BuildRequires: readline-devel zlib-devel
 BuildRequires: util-linux
 BuildRequires: multilib-rpm-config
 
-%if %psqlsetup
 # postgresql-setup build requires
 BuildRequires: m4 elinks docbook-utils help2man
-%endif
 
 %if %plpython
 BuildRequires: python-devel
@@ -223,8 +226,8 @@ PostgreSQL server.
 %package server
 Summary: The programs needed to create and run a PostgreSQL server
 Group: Applications/Databases
-Requires: %{name}%{?_isa} = %{version}-%{release}
-Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %precise_version
+Requires: %{name}-libs%{?_isa} = %precise_version
 Requires(pre): /usr/sbin/useradd
 # We require this to be present for %%{_prefix}/lib/tmpfiles.d
 %if 0%{?fedora} || 0%{?rhel} >= 7
@@ -238,11 +241,12 @@ Requires(preun): chkconfig, initscripts
 Requires(postun): initscripts
 %endif
 # Packages which provide postgresql plugins should build-require
-# postgresql-devel and require
+# postgresql-(server-)devel and require
 # postgresql-server(:MODULE_COMPAT_%%{postgresql_major}).
 # This will automatically guard against incompatible server & plugin
 # installation (#1008939, #1007840)
 Provides: %{name}-server(:MODULE_COMPAT_%{majorversion})
+Provides: bundled(postgresql-setup) = %setup_version
 
 %description server
 PostgreSQL is an advanced Object-Relational database management system (DBMS).
@@ -254,9 +258,9 @@ and maintain PostgreSQL databases.
 %package docs
 Summary: Extra documentation for PostgreSQL
 Group: Applications/Databases
-Requires: %{name}%{?_isa} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %precise_version
 # Just for more intuitive documentation installation
-Provides: %{name}-doc = %{version}-%{release}
+Provides: %{name}-doc = %precise_version
 
 %description docs
 The postgresql-docs package contains some additional documentation for
@@ -267,8 +271,8 @@ and source files for the PostgreSQL tutorial.
 %package contrib
 Summary: Extension modules distributed with PostgreSQL
 Group: Applications/Databases
-Requires: %{name}%{?_isa} = %{version}-%{release}
-Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Requires: %{name}%{?_isa} = %precise_version
+Requires: %{name}-libs%{?_isa} = %precise_version
 
 %description contrib
 The postgresql-contrib package contains various extension modules that are
@@ -278,7 +282,7 @@ included in the PostgreSQL distribution.
 %package devel
 Summary: PostgreSQL development header files and libraries
 Group: Development/Libraries
-Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Requires: %{name}-libs%{?_isa} = %precise_version
 Provides: libpq-devel = %{version}-%{release}
 Provides: libecpg-devel = %{version}-%{release}
 Provides: postgresql-server-devel = %{version}-%{release}
@@ -290,6 +294,13 @@ with a PostgreSQL database management server.  It also contains the ecpg
 Embedded C Postgres preprocessor. You need to install this package if you want
 to develop applications which will interact with a PostgreSQL server.
 
+%package test-rpm-macros
+Summary: Convenience RPM macros for build-time testing against PostgreSQL server
+Requires: %{name}-server = %precise_version
+
+%description test-rpm-macros
+This package is meant to be added as BuildRequires: dependency of other packages
+that want to run build-time testsuite against running PostgreSQL server.
 
 %package static
 Summary: Statically linked PostgreSQL libraries
@@ -304,21 +315,31 @@ counterparts.
 %package upgrade
 Summary: Support for upgrading from the previous major release of PostgreSQL
 Group: Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
-Requires: %{name}-libs%{?_isa} = %{version}-%{release}
+Requires: %{name}-server%{?_isa} = %precise_version
+Requires: %{name}-libs%{?_isa} = %precise_version
+Provides: bundled(postgresql-server) = %prevversion
 
 %description upgrade
 The postgresql-upgrade package contains the pg_upgrade utility and supporting
 files needed for upgrading a PostgreSQL database from the previous major
 version of PostgreSQL.
-%endif
 
+%package upgrade-devel
+Summary: Support for build of extensions required for upgrade process
+Group: Development/Libraries
+Requires: %{name}-upgrade%{?_isa} = %precise_version
+
+%description upgrade-devel
+The postgresql-devel package contains the header files and libraries
+needed to compile C or C++ applications which are necessary in upgrade
+process.
+%endif
 
 %if %plperl
 %package plperl
 Summary: The Perl procedural language for PostgreSQL
 Group: Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
+Requires: %{name}-server%{?_isa} = %precise_version
 Requires: perl(:MODULE_COMPAT_%(eval "`%{__perl} -V:version`"; echo $version))
 %if %runselftest
 BuildRequires: perl(Data::Dumper)
@@ -338,7 +359,8 @@ Install this if you want to write database functions in Perl.
 %package plpython
 Summary: The Python2 procedural language for PostgreSQL
 Group: Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
+Requires: %{name}-server%{?_isa} = %precise_version
+Provides: %{name}-plpython2 = %precise_version
 
 %description plpython
 The postgresql-plpython package contains the PL/Python procedural language,
@@ -350,7 +372,7 @@ Install this if you want to write database functions in Python 2.
 %package plpython3
 Summary: The Python3 procedural language for PostgreSQL
 Group: Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
+Requires: %{name}-server%{?_isa} = %precise_version
 
 %description plpython3
 The postgresql-plpython3 package contains the PL/Python3 procedural language,
@@ -362,8 +384,7 @@ Install this if you want to write database functions in Python 3.
 %package pltcl
 Summary: The Tcl procedural language for PostgreSQL
 Group: Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
-Requires: tcl-pgtcl
+Requires: %{name}-server%{?_isa} = %precise_version
 
 %description pltcl
 The postgresql-pltcl package contains the PL/Tcl procedural language,
@@ -375,8 +396,8 @@ Install this if you want to write database functions in Tcl.
 %package test
 Summary: The test suite distributed with PostgreSQL
 Group: Applications/Databases
-Requires: %{name}-server%{?_isa} = %{version}-%{release}
-Requires: %{name}-devel%{?_isa} = %{version}-%{release}
+Requires: %{name}-server%{?_isa} = %precise_version
+Requires: %{name}-devel%{?_isa} = %precise_version
 
 %description test
 The postgresql-test package contains files needed for various tests for the
@@ -385,12 +406,14 @@ benchmarks.
 %endif
 
 %prep
-( cd %_sourcedir; sha256sum -c %{SOURCE16}; sha256sum -c %{SOURCE17} )
-%if %psqlsetup
-%setup -q -a 12
-%else
-%setup -q
+(
+  cd "$(dirname "%{SOURCE0}")"
+  sha256sum -c %{SOURCE16}
+%if %upgrade
+  sha256sum -c %{SOURCE17}
 %endif
+)
+%setup -q -a 12
 %patch1 -p1
 %patch2 -p1
 %patch5 -p1
@@ -450,7 +473,6 @@ touch -r %{SOURCE4} postgresql-check-db-dir
 	fi
 %endif
 
-%if %psqlsetup
 # Building postgresql-setup
 cd postgresql-setup-%{setup_version}
 
@@ -462,7 +484,6 @@ cd postgresql-setup-%{setup_version}
 
 make %{?_smp_mflags}
 cd ..
-%endif
 
 # Fiddling with CFLAGS.
 
@@ -480,128 +501,97 @@ export CFLAGS
 # distclean and do it again for the "normal" build.  Note that the installed
 # Makefile.global will reflect the python 2 build, which seems appropriate
 # since that's still considered the default plpython version.
+common_configure_options='
+	--disable-rpath
+%if %beta
+	--enable-debug
+	--enable-cassert
+%endif
+%if %plperl
+	--with-perl
+%endif
+%if %pltcl
+	--with-tcl
+	--with-tclconfig=%_libdir
+%endif
+%if %ldap
+	--with-ldap
+%endif
+%if %ssl
+	--with-openssl
+%endif
+%if %pam
+	--with-pam
+%endif
+%if %kerberos
+	--with-krb5
+	--with-gssapi
+%endif
+%if %uuid
+	--with-ossp-uuid
+%endif
+%if %xml
+	--with-libxml
+	--with-libxslt
+%endif
+%if %nls
+	--enable-nls
+%endif
+%if %sdt
+	--enable-dtrace
+%endif
+%if %selinux
+	--with-selinux
+%endif
+	--with-system-tzdata=%_datadir/zoneinfo
+	--datadir=%_datadir/pgsql
+%if 0%{?fedora} || 0%{?rhel} >= 7
+	--with-systemd
+%endif
+'
+
 %if %plpython3
 
 export PYTHON=/usr/bin/python3
 
 # These configure options must match main build
-%configure --disable-rpath \
-%if %beta
-	--enable-debug \
-	--enable-cassert \
-%endif
-%if %plperl
-	--with-perl \
-%endif
-%if %pltcl
-	--with-tcl \
-	--with-tclconfig=%{_libdir} \
-%endif
-%if %plpython3
-	--with-python \
-%endif
-%if %ldap
-	--with-ldap \
-%endif
-%if %ssl
-	--with-openssl \
-%endif
-%if %pam
-	--with-pam \
-%endif
-%if %kerberos
-	--with-krb5 \
-	--with-gssapi \
-%endif
-%if %uuid
-	--with-ossp-uuid \
-%endif
-%if %xml
-	--with-libxml \
-	--with-libxslt \
-%endif
-%if %nls
-	--enable-nls \
-%endif
-%if %sdt
-	--enable-dtrace \
-%endif
-%if %selinux
-	--with-selinux \
-%endif
-%if 0%{?fedora} || 0%{?rhel} >= 7
-	--with-systemd \
-%endif
-	--with-system-tzdata=%{_datadir}/zoneinfo \
-	--datadir=%{_datadir}/pgsql
+%configure $common_configure_options \
+	--with-python
 
 # Fortunately we don't need to build much except plpython itself.
-make %{?_smp_mflags} -C src/pl/plpython all
+%global python_subdirs       \\\
+	src/pl/plpython          \\\
+	contrib/hstore_plpython  \\\
+	contrib/ltree_plpython
+
+for dir in %python_subdirs; do
+	%make_build -C "$dir" all
+done
+
 # save built form in a directory that "make distclean" won't touch
-cp -a src/pl/plpython src/pl/plpython3
+for dir in %python_subdirs; do
+	rm -rf "${dir}3" # shouldn't exist, unless --short-circuit
+	cp -a "$dir" "${dir}3"
+done
 
 # must also save this version of Makefile.global for later
 cp src/Makefile.global src/Makefile.global.python3
 
 make distclean
 
+%endif # %%plpython3
+
+PYTHON=/usr/bin/python2
+
+# Normal (python2) build begins here
+%configure $common_configure_options \
+%if %plpython
+	--with-python
 %endif
 
 unset PYTHON
 
-# Normal (not python3) build begins here
-
-%configure --disable-rpath \
-%if %beta
-	--enable-debug \
-	--enable-cassert \
-%endif
-%if %plperl
-	--with-perl \
-%endif
-%if %pltcl
-	--with-tcl \
-	--with-tclconfig=%{_libdir} \
-%endif
-%if %plpython
-	--with-python \
-%endif
-%if %ldap
-	--with-ldap \
-%endif
-%if %ssl
-	--with-openssl \
-%endif
-%if %pam
-	--with-pam \
-%endif
-%if %kerberos
-	--with-krb5 \
-	--with-gssapi \
-%endif
-%if %uuid
-	--with-ossp-uuid \
-%endif
-%if %xml
-	--with-libxml \
-	--with-libxslt \
-%endif
-%if %nls
-	--enable-nls \
-%endif
-%if %sdt
-	--enable-dtrace \
-%endif
-%if %selinux
-	--with-selinux \
-%endif
-%if 0%{?fedora} || 0%{?rhel} >= 7
-	--with-systemd \
-%endif
-	--with-system-tzdata=%_datadir/zoneinfo \
-	--datadir=%_datadir/pgsql
-
-make %{?_smp_mflags} world
+%make_build world
 
 # Have to hack makefile to put correct path into tutorial scripts
 sed "s|C=\`pwd\`;|C=%{_libdir}/pgsql/tutorial;|" < src/tutorial/Makefile > src/tutorial/GNUmakefile
@@ -641,17 +631,25 @@ test_failure=0
 	mv src/Makefile.global src/Makefile.global.save
 	cp src/Makefile.global.python3 src/Makefile.global
 	touch -r src/Makefile.global.save src/Makefile.global
-	# because "make check" does "make install" on the whole tree,
-	# we must temporarily install plpython3 as src/pl/plpython,
-	# since that is the subdirectory src/pl/Makefile knows about
-	mv src/pl/plpython src/pl/plpython2
-	mv src/pl/plpython3 src/pl/plpython
 
-	run_testsuite "src/pl/plpython"
+	for dir in %python_subdirs; do
+		# because "make check" does "make install" on the whole tree,
+		# we must temporarily install *plpython3 dir as *plpython,
+		# since that is the subdirectory src/pl/Makefile knows about
+		mv "$dir" "${dir}2"
+		mv "${dir}3" "$dir"
+	done
 
-	# and clean up our mess
-	mv src/pl/plpython src/pl/plpython3
-	mv src/pl/plpython2 src/pl/plpython
+	for dir in %python_subdirs; do
+		run_testsuite "$dir"
+	done
+
+	for dir in %python_subdirs; do
+		# and clean up our mess
+		mv "$dir" "${dir}3"
+		mv "${dir}2" "${dir}"
+	done
+
 	mv -f src/Makefile.global.save src/Makefile.global
 %endif
 	run_testsuite "contrib"
@@ -670,25 +668,68 @@ test "$test_failure" -eq 0
 
 	# The upgrade build can be pretty stripped-down, but make sure that
 	# any options that affect on-disk file layout match the previous
-	# major release!  Also, note we intentionally do not use %%configure
-	# here, because we *don't* want its ideas about installation paths.
+	# major release!
+
+	# The set of built server modules here should ideally create superset
+	# of modules we used to ship in %%prevversion (in the installation
+	# the user will upgrade from), including *-contrib or *-pl*
+	# subpackages.  This increases chances that the upgrade from
+	# %%prevversion will work smoothly.
+
+upgrade_configure ()
+{
+	# Note we intentionally do not use %%configure here, because we *don't* want
+	# its ideas about installation paths.
 
 	# The -fno-aggressive-loop-optimizations is hack for #993532
+	PYTHON="${PYTHON-/usr/bin/python2}" \
 	CFLAGS="$CFLAGS -fno-aggressive-loop-optimizations" ./configure \
 		--build=%{_build} \
 		--host=%{_host} \
-		--prefix=%{_libdir}/pgsql/postgresql-%{prevmajorversion} \
+		--prefix=%prev_prefix \
 		--disable-rpath \
 %if %beta
 		--enable-debug \
 		--enable-cassert \
 %endif
-		--with-system-tzdata=/usr/share/zoneinfo
+%if %plperl
+		--with-perl \
+%endif
+%if %pltcl
+		--with-tcl \
+%endif
+		--with-tclconfig=%_libdir \
+		--with-system-tzdata=/usr/share/zoneinfo \
+		"$@"
+}
+
+%if %plpython3
+	export PYTHON=/usr/bin/python3
+	upgrade_configure --with-python
+
+	%make_build -C src/backend submake-errcodes
+
+	for dir in %python_subdirs; do
+		# Previous version doesn't necessarily have this.
+		test -d "$dir" || continue
+		%make_build -C "$dir" all
+
+		# save aside the only one file which we are interested here
+		cp "$dir"/*plpython3.so ./
+	done
+	unset PYTHON
+	make distclean
+%endif
+
+	upgrade_configure \
+%if %plpython
+		--with-python
+%endif
 
 	make %{?_smp_mflags} all
-
+	make -C contrib %{?_smp_mflags} all
 	popd
-%endif
+%endif # %%upgrade
 
 %install
 %if 0%{?fedora} || 0%{?rhel} >= 7
@@ -705,7 +746,6 @@ sed 's/^PGVERSION=.*$/PGVERSION=%{version}/' <%{SOURCE3} >postgresql.init
 install -m 755 postgresql.init $RPM_BUILD_ROOT%{_initrddir}/postgresql
 %endif
 
-%if %psqlsetup
 cd postgresql-setup-%{setup_version}
 make install DESTDIR=$RPM_BUILD_ROOT
 cd ..
@@ -723,7 +763,6 @@ engine          %{_libdir}/pgsql/postgresql-%{prevmajorversion}/bin
 description     "Upgrade data from system PostgreSQL version (PostgreSQL %{prevmajorversion})"
 redhat_sockets_hack no
 EOF
-%endif
 
 make DESTDIR=$RPM_BUILD_ROOT install-world
 
@@ -731,9 +770,9 @@ make DESTDIR=$RPM_BUILD_ROOT install-world
 	mv src/Makefile.global src/Makefile.global.save
 	cp src/Makefile.global.python3 src/Makefile.global
 	touch -r src/Makefile.global.save src/Makefile.global
-	pushd src/pl/plpython3
-	make DESTDIR=$RPM_BUILD_ROOT install
-	popd
+	for dir in %python_subdirs; do
+		%make_install -C "${dir}3"
+	done
 	mv -f src/Makefile.global.save src/Makefile.global
 %endif
 
@@ -741,7 +780,7 @@ make DESTDIR=$RPM_BUILD_ROOT install-world
 install -d -m 755 $RPM_BUILD_ROOT%{_datadir}/pgsql/contrib
 install -d -m 755 $RPM_BUILD_ROOT%{_datadir}/pgsql/extension
 
-# multilib header hack; some headers are installed in two places!
+# multilib header hack
 for header in \
 	%{_includedir}/pg_config.h \
 	%{_includedir}/pg_config_ext.h \
@@ -779,6 +818,13 @@ install -m 644 %{SOURCE11} $RPM_BUILD_ROOT%{?_localstatedir}/lib/pgsql/.bash_pro
 %if %upgrade
 	pushd postgresql-%{prevversion}
 	make DESTDIR=$RPM_BUILD_ROOT install
+	make -C contrib DESTDIR=$RPM_BUILD_ROOT install
+%if %plpython3
+	for file in *plpython3.so; do
+		install -m 755 "$file" \
+			$RPM_BUILD_ROOT/%_libdir/pgsql/postgresql-%prevmajorversion/lib
+	done
+%endif
 	popd
 
 	# remove stuff we don't actually need for upgrade purposes
@@ -792,29 +838,32 @@ install -m 644 %{SOURCE11} $RPM_BUILD_ROOT%{?_localstatedir}/lib/pgsql/.bash_pro
 	rm bin/dropuser
 	rm bin/ecpg
 	rm bin/initdb
-	rm bin/pg_config
 	rm bin/pg_dump
 	rm bin/pg_dumpall
 	rm bin/pg_restore
 	rm bin/psql
 	rm bin/reindexdb
 	rm bin/vacuumdb
-	rm -rf include
-	rm lib/dict_snowball.so
-	rm lib/libecpg*
-	rm lib/libpg*
-	rm lib/libpq*
-	rm -rf lib/pgxs
-	rm lib/plpgsql.so
 	rm -rf share/doc
 	rm -rf share/man
 	rm -rf share/tsearch_data
+	rm lib/*.a
+	# Drop libpq.  This might need some tweaks once there's
+	# soname bump between %%prevversion and %%version.
+	rm lib/libpq.so*
+	# Drop libraries.
+	rm lib/lib{ecpg,ecpg_compat,pgtypes}.so*
 	rm share/*.bki
 	rm share/*description
 	rm share/*.sample
 	rm share/*.sql
 	rm share/*.txt
+	rm share/extension/*.sql
+	rm share/extension/*.control
 	popd
+	cat <<EOF > $RPM_BUILD_ROOT%macrosdir/macros.%name-upgrade
+%%postgresql_upgrade_prefix %prev_prefix
+EOF
 %endif
 
 
@@ -853,68 +902,36 @@ rm -f $RPM_BUILD_ROOT%{_bindir}/pgsql/hstore_plperl.so
 rm -f $RPM_BUILD_ROOT%{_bindir}/pgsql/hstore_plpython2.so
 %endif
 
-# initialize file lists
-cp /dev/null main.lst
-cp /dev/null libs.lst
-cp /dev/null server.lst
-cp /dev/null devel.lst
-cp /dev/null plperl.lst
-cp /dev/null pltcl.lst
-cp /dev/null plpython.lst
-cp /dev/null plpython3.lst
-
 %if %nls
-%find_lang ecpg-%{majorversion}
-cat ecpg-%{majorversion}.lang >>devel.lst
-%find_lang ecpglib6-%{majorversion}
-cat ecpglib6-%{majorversion}.lang >>libs.lst
-%find_lang initdb-%{majorversion}
-cat initdb-%{majorversion}.lang >>server.lst
-%find_lang libpq5-%{majorversion}
-cat libpq5-%{majorversion}.lang >>libs.lst
-%find_lang pg_basebackup-%{majorversion}
-cat pg_basebackup-%{majorversion}.lang >>server.lst
-%find_lang pg_controldata-%{majorversion}
-cat pg_controldata-%{majorversion}.lang >>server.lst
-%find_lang pg_ctl-%{majorversion}
-cat pg_ctl-%{majorversion}.lang >>server.lst
-%find_lang pg_config-%{majorversion}
-cat pg_config-%{majorversion}.lang >>main.lst
-%find_lang pg_dump-%{majorversion}
-cat pg_dump-%{majorversion}.lang >>main.lst
-%find_lang pg_resetxlog-%{majorversion}
-cat pg_resetxlog-%{majorversion}.lang >>server.lst
-%find_lang pg_rewind-%{majorversion}
-cat pg_rewind-%{majorversion}.lang >>server.lst
-%find_lang pgscripts-%{majorversion}
-cat pgscripts-%{majorversion}.lang >>main.lst
+find_lang_bins ()
+{
+	lstfile=$1 ; shift
+	cp /dev/null "$lstfile"
+	for binary; do
+		%find_lang "$binary"-%{majorversion}
+		cat "$binary"-%{majorversion}.lang >>"$lstfile"
+	done
+}
+find_lang_bins devel.lst %{?external_libs:pg_server_config}%{?!external_libs:pg_config ecpg}
+%{!?external_libs:find_lang_bins libs.lst ecpglib6 libpq5}
+find_lang_bins server.lst \
+	initdb pg_basebackup pg_controldata pg_ctl pg_resetxlog pg_rewind plpgsql postgres
+find_lang_bins main.lst \
+	pg_dump pgscripts psql
 %if %plperl
-%find_lang plperl-%{majorversion}
-cat plperl-%{majorversion}.lang >>plperl.lst
+find_lang_bins plperl.lst plperl
 %endif
-%find_lang plpgsql-%{majorversion}
-cat plpgsql-%{majorversion}.lang >>server.lst
 %if %plpython
-%find_lang plpython-%{majorversion}
-cat plpython-%{majorversion}.lang >>plpython.lst
+find_lang_bins plpython.lst plpython
 %endif
 %if %plpython3
 # plpython3 shares message files with plpython
-%find_lang plpython-%{majorversion}
-cat plpython-%{majorversion}.lang >>plpython3.lst
+find_lang_bins plpython3.lst plpython
 %endif
 %if %pltcl
-%find_lang pltcl-%{majorversion}
-cat pltcl-%{majorversion}.lang >>pltcl.lst
+find_lang_bins pltcl.lst pltcl
 %endif
-%find_lang postgres-%{majorversion}
-cat postgres-%{majorversion}.lang >>server.lst
-%find_lang psql-%{majorversion}
-cat psql-%{majorversion}.lang >>main.lst
 %endif
-
-%post libs -p /sbin/ldconfig
-%postun libs -p /sbin/ldconfig
 
 %pre server
 /usr/sbin/groupadd -g 26 -o -r postgres >/dev/null 2>&1 || :
@@ -948,18 +965,18 @@ fi
 %endif
 
 %check
-%if %runselftest && %psqlsetup
+%if %runselftest
 make -C postgresql-setup-%{setup_version} check
 %endif
 
 %clean
 
-# FILES section.
+# FILES sections.
 
 %files -f main.lst
 %doc doc/KNOWN_BUGS doc/MISSING_FEATURES doc/TODO
 %doc COPYRIGHT README HISTORY doc/bug.template
-%if %psqlsetup || 0%{?fedora} || 0%{?rhel} >= 7
+%if 0%{?fedora} || 0%{?rhel} >= 7
 %doc README.rpm-dist
 %endif
 %{_bindir}/clusterdb
@@ -977,7 +994,6 @@ make -C postgresql-setup-%{setup_version} check
 %{_bindir}/psql
 %{_bindir}/reindexdb
 %{_bindir}/vacuumdb
-%dir %{_libdir}/pgsql
 %{_mandir}/man1/clusterdb.*
 %{_mandir}/man1/createdb.*
 %{_mandir}/man1/createlang.*
@@ -1076,12 +1092,18 @@ make -C postgresql-setup-%{setup_version} check
 %if %plpython
 %{_libdir}/pgsql/hstore_plpython2.so
 %endif
+%if %plpython3
+%{_libdir}/pgsql/hstore_plpython3.so
+%endif
 %{_libdir}/pgsql/insert_username.so
 %{_libdir}/pgsql/isn.so
 %{_libdir}/pgsql/lo.so
 %{_libdir}/pgsql/ltree.so
 %if %plpython
 %{_libdir}/pgsql/ltree_plpython2.so
+%endif
+%if %plpython3
+%{_libdir}/pgsql/ltree_plpython3.so
 %endif
 %{_libdir}/pgsql/moddatetime.so
 %{_libdir}/pgsql/pageinspect.so
@@ -1134,6 +1156,7 @@ make -C postgresql-setup-%{setup_version} check
 
 %files libs -f libs.lst
 %doc COPYRIGHT
+%dir %{_libdir}/pgsql
 %{_libdir}/libecpg.so.*
 %{_libdir}/libecpg_compat.so.*
 %{_libdir}/libpgtypes.so.*
@@ -1150,7 +1173,7 @@ make -C postgresql-setup-%{setup_version} check
 %{_bindir}/pg_rewind
 %{_bindir}/postgres
 %{_bindir}/postmaster
-%if %psqlsetup || 0%{?fedora} || 0%{?rhel} >= 7
+%if 0%{?fedora} || 0%{?rhel} >= 7
 %{_bindir}/postgresql-setup
 %endif
 %if 0%{?fedora} || 0%{?rhel} >= 7
@@ -1200,14 +1223,12 @@ make -C postgresql-setup-%{setup_version} check
 %if %pam
 %config(noreplace) /etc/pam.d/postgresql
 %endif
-%if %psqlsetup
+
 %dir %{_libexecdir}/initscripts/legacy-actions/postgresql
 %{_libexecdir}/initscripts/legacy-actions/postgresql/*
 %{_libexecdir}/postgresql-check-db-dir
-%{_libexecdir}/postgresql-ctl
 %dir %{_datadir}/postgresql-setup
 %{_datadir}/postgresql-setup/library.sh
-%{_datadir}/postgresql-setup/postgresql_pkg_tests.sh
 %dir %{_sysconfdir}/postgresql-setup
 %dir %{_sysconfdir}/postgresql-setup/upgrade
 %config %{_sysconfdir}/postgresql-setup/upgrade/*.conf
@@ -1217,7 +1238,7 @@ make -C postgresql-setup-%{setup_version} check
 %{_sbindir}/postgresql-new-systemd-unit
 %{_unitdir}/*postgresql*.service
 %endif
-%endif
+
 
 %files devel -f devel.lst
 %{_bindir}/ecpg
@@ -1232,9 +1253,11 @@ make -C postgresql-setup-%{setup_version} check
 %{_mandir}/man1/ecpg.*
 %{_mandir}/man1/pg_config.*
 %{_mandir}/man3/SPI_*
-%if %psqlsetup
-%{macrosdir}/*
-%endif
+%{macrosdir}/macros.%name
+
+%files test-rpm-macros
+%{_datadir}/postgresql-setup/postgresql_pkg_tests.sh
+%{macrosdir}/macros.%name-test
 
 %files static
 %{_libdir}/libpgcommon.a
@@ -1242,7 +1265,19 @@ make -C postgresql-setup-%{setup_version} check
 
 %if %upgrade
 %files upgrade
-%{_libdir}/pgsql/postgresql-%{prevmajorversion}
+%{_libdir}/pgsql/postgresql-%{prevmajorversion}/bin
+%exclude %{_libdir}/pgsql/postgresql-%{prevmajorversion}/bin/pg_config
+%{_libdir}/pgsql/postgresql-%{prevmajorversion}/lib
+%exclude %{_libdir}/pgsql/postgresql-%{prevmajorversion}/lib/pgxs
+%exclude %{_libdir}/pgsql/postgresql-%{prevmajorversion}/lib/pkgconfig
+%{_libdir}/pgsql/postgresql-%{prevmajorversion}/share
+
+%files upgrade-devel
+%{_libdir}/pgsql/postgresql-%{prevmajorversion}/bin/pg_config
+%{_libdir}/pgsql/postgresql-%{prevmajorversion}/include
+%{_libdir}/pgsql/postgresql-%{prevmajorversion}/lib/pkgconfig
+%{_libdir}/pgsql/postgresql-%{prevmajorversion}/lib/pgxs
+%{macrosdir}/macros.%name-upgrade
 %endif
 
 %if %plperl
@@ -1280,6 +1315,23 @@ make -C postgresql-setup-%{setup_version} check
 %endif
 
 %changelog
+* Thu Aug 08 2019 Petr Kubat <pkubat@redhat.com> - 9.6.15-1
+- Rebase to upstream release 9.6.15
+  https://www.postgresql.org/docs/9.6/release-9-6-15.html
+
+* Thu Jul 11 2019 Petr Kubat <pkubat@redhat.com> - 9.6.14-1
+- Rebase to upstream release 9.6.14
+  https://www.postgresql.org/docs/9.6/release-9-6-14.html
+
+* Thu May 09 2019 Patrik Novotný <panovotn@redhat.com> - 9.6.13-1
+- New postgresql-setup 8.4
+- Rebase to upstream release 9.6.13
+  https://www.postgresql.org/docs/9.6/release-9-6-13.html
+
+* Thu Feb 14 2019 Patrik Novotný <panovotn@redhat.com> - 9.6.12-1
+- Rebase to upstream release 9.6.12
+  https://www.postgresql.org/docs/9.6/release-9-6-12.html
+
 * Thu Nov 08 2018 Patrik Novotný <panovotn@redhat.com> - 9.6.11-1
 - Rebase to upstream version 9.6.11
   https://www.postgresql.org/docs/9.6/release-9-6-11.html
