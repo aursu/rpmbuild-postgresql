@@ -2,7 +2,10 @@ FROM aursu/rpmbuild:6-build
 
 USER root
 RUN yum -y install \
+        docbook-utils \
+        elinks \
         gettext \
+        help2man \
         multilib-rpm-config \
         openssl-devel \
         pam-devel \
