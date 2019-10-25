@@ -1224,8 +1224,10 @@ make -C postgresql-setup-%{setup_version} check
 %config(noreplace) /etc/pam.d/postgresql
 %endif
 
+%if 0%{?fedora} || 0%{?rhel} >= 7
 %dir %{_libexecdir}/initscripts/legacy-actions/postgresql
 %{_libexecdir}/initscripts/legacy-actions/postgresql/*
+%endif
 %{_libexecdir}/postgresql-check-db-dir
 %dir %{_datadir}/postgresql-setup
 %{_datadir}/postgresql-setup/library.sh
