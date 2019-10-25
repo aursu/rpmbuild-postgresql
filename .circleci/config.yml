@@ -18,7 +18,6 @@ jobs:
           command: |
             docker-compose -f rpmbuild/docker-compose.yml pull
             docker-compose -f rpmbuild/docker-compose.bintray.yml pull
-            docker-compose -f rpmbuild/docker-compose.refresh.yml pull
       - run:
           name: Build PHP Docker images
           command: |

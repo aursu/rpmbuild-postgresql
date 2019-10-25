@@ -1173,9 +1173,7 @@ make -C postgresql-setup-%{setup_version} check
 %{_bindir}/pg_rewind
 %{_bindir}/postgres
 %{_bindir}/postmaster
-%if 0%{?fedora} || 0%{?rhel} >= 7
 %{_bindir}/postgresql-setup
-%endif
 %if 0%{?fedora} || 0%{?rhel} >= 7
 %{_bindir}/postgresql-check-db-dir
 %endif
@@ -1227,6 +1225,8 @@ make -C postgresql-setup-%{setup_version} check
 %if 0%{?fedora} || 0%{?rhel} >= 7
 %dir %{_libexecdir}/initscripts/legacy-actions/postgresql
 %{_libexecdir}/initscripts/legacy-actions/postgresql/*
+%else
+%{_libexecdir}/postgresql-ctl
 %endif
 %{_libexecdir}/postgresql-check-db-dir
 %dir %{_datadir}/postgresql-setup
